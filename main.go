@@ -43,7 +43,11 @@ type Elem struct {
 
 func getElemName(data []byte) string {
 	var e Elem
-	off := data[binary.Size(e):]
+	sz := binary.Size(e)
+	if sz >= len(data) {
+		return ""
+	}
+	off := data[sz:]
 	var buffer bytes.Buffer
 
 	for i := 0; i < len(off); i += 2 {
@@ -69,17 +73,26 @@ func UnpackToDirectoryNoLoad(dirname string, file *os.File, FileDataSize int64) 
 		var addr ElemAddr
 		binary.Read(elemsReader, binary.LittleEndian, &addr)
 
+		if addr.Reserved != magicUndefined {
+			fmt.Printf("Done at %d\n", i)
+			break
+		}
+
 		file.Seek(int64(addr.ElemHeaderAddr), os.SEEK_SET)
 		elemHeaderData := ReadDataBlock(file)
 		elemName := getElemName(elemHeaderData)
 
-		fmt.Printf("found file %s\n", elemName)
+		fmt.Printf("found file %s", elemName)
 
 		if addr.ElemDataAddr != magicUndefined {
 			file.Seek(int64(addr.ElemDataAddr), os.SEEK_SET)
 			elemDataData := ReadDataBlock(file)
 			SmartUnpackData(elemDataData)
+
+			fmt.Printf(" with size %d", len(elemDataData))
 		}
+
+		fmt.Println()
 	}
 }
 

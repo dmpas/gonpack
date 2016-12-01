@@ -33,6 +33,10 @@ type blockHeader struct {
 	EOL2            [2]byte
 }
 
+func (block *Block) setR(r *os.File) {
+	block.r = r
+}
+
 func (block *Block) Read(buf []byte) (n int, err error) {
 
 	if block.currentPageData == nil {
@@ -56,35 +60,23 @@ func (block *Block) Read(buf []byte) (n int, err error) {
 			if err != nil {
 				return 0, err
 			}
-			block.currentPageIndex = 0
-			block.currentPageData = make([]byte, block.Header.DataSize)
 		}
 
+		block.currentPageIndex = 0
+		block.currentPageData = make([]byte, block.Header.PageSize)
 		block.NextPageAddr = block.Header.NextPageAddr
 
-		curn := 0
-		for {
-			ng, err := block.r.Read(block.currentPageData[curn:block.Header.PageSize])
-			if err != nil {
-				return 0, err
-			}
-			curn += ng
+		_, err := io.ReadFull(block.r, block.currentPageData)
+		if err != nil {
+			return 0, err
 		}
 	}
 
 	err = nil
-	dataLeft := len(block.currentPageData) - block.currentPageIndex
-	if dataLeft >= len(buf) {
-		n = len(buf)
-	} else {
-		n = dataLeft
-	}
-
-	copy(buf, block.currentPageData[block.currentPageIndex:])
+	n = copy(buf, block.currentPageData[block.currentPageIndex:])
 	block.currentPageIndex += n
-	if block.currentPageIndex == len(block.currentPageData) {
+	if block.currentPageIndex >= len(block.currentPageData) {
 		block.currentPageData = nil
-		block.currentPageIndex = 0
 	}
 
 	return
@@ -98,19 +90,21 @@ func (header *BlockHeader) Read(r io.Reader) error {
 		return err
 	}
 
+	if !serializedHeader.IsTrueV8() {
+		panic("213")
+	}
+
 	header.DataSize, header.PageSize, header.NextPageAddr = serializedHeader.Decompose()
 	return nil
 }
 
-func ReadDataBlock(r io.Reader) []byte {
-	var bh BlockHeader
-	bh.Read(r)
-
+func ReadDataBlock(r *os.File) []byte {
 	var b Block
-	b.Header = bh
+	b.Header.Read(r)
+	b.setR(r)
 
-	buf := make([]byte, bh.DataSize)
-	_, err := io.ReadFull(r, buf)
+	buf := make([]byte, b.Header.DataSize)
+	_, err := io.ReadFull(&b, buf)
 
 	if err != nil {
 		panic(err)
@@ -135,7 +129,7 @@ func (header blockHeader) IsTrueV8() bool {
 func _httoi(b [8]byte) (result int32) {
 	result = 0
 	for i := 0; i < len(b); i++ {
-		result = result * 16
+		result *= 16
 		if b[i] >= '0' && b[i] <= '9' {
 			result += int32(b[i] - '0')
 		} else if b[i] >= 'a' && b[i] <= 'f' {
