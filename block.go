@@ -77,6 +77,9 @@ func (block *Block) Read(buf []byte) (n int, err error) {
 	block.currentPageIndex += n
 	if block.currentPageIndex >= len(block.currentPageData) {
 		block.currentPageData = nil
+		if block.NextPageAddr == magicUndefined {
+			err = io.EOF
+		}
 	}
 
 	return
@@ -98,6 +101,7 @@ func (header *BlockHeader) Read(r io.Reader) error {
 	return nil
 }
 
+// ReadDataBlock считывает блок данных из текущей позиции в файле
 func ReadDataBlock(r *os.File) []byte {
 	var b Block
 	b.Header.Read(r)
@@ -110,6 +114,16 @@ func ReadDataBlock(r *os.File) []byte {
 		panic(err)
 	}
 	return buf
+}
+
+// TransferDataBlock пересылает считываемые данные блочного файла r прямо в Писателя w
+func TransferDataBlock(r *os.File, w io.Writer) error {
+	var b Block
+	b.Header.Read(r)
+	b.setR(r)
+
+	_, err := io.Copy(w, &b)
+	return err
 }
 
 func (header blockHeader) IsTrueV8() bool {
