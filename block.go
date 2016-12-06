@@ -8,6 +8,13 @@ import (
 
 const magicUndefined int32 = 0x7fffffff
 
+type NotAV8File struct {
+}
+
+func (e NotAV8File) Error() string {
+	return "Not a V8 file!"
+}
+
 type BlockHeader struct {
 	DataSize     int32
 	PageSize     int32
@@ -94,7 +101,7 @@ func (header *BlockHeader) Read(r io.Reader) error {
 	}
 
 	if !serializedHeader.IsTrueV8() {
-		panic("213")
+		return NotAV8File{}
 	}
 
 	header.DataSize, header.PageSize, header.NextPageAddr = serializedHeader.Decompose()
@@ -102,27 +109,33 @@ func (header *BlockHeader) Read(r io.Reader) error {
 }
 
 // ReadDataBlock считывает блок данных из текущей позиции в файле
-func ReadDataBlock(r *os.File) []byte {
+func ReadDataBlock(r *os.File) (buf []byte, err error) {
+	var b Block
+
+	err = b.Header.Read(r)
+	if err != nil {
+		return
+	}
+
+	b.setR(r)
+
+	buf = make([]byte, b.Header.DataSize)
+	_, err = io.ReadFull(&b, buf)
+
+	return
+}
+
+// GetBlockReader создаёт io.Reader для считывания текущей цепочки блоков из файла r
+func GetBlockReader(r *os.File) io.Reader {
 	var b Block
 	b.Header.Read(r)
 	b.setR(r)
-
-	buf := make([]byte, b.Header.DataSize)
-	_, err := io.ReadFull(&b, buf)
-
-	if err != nil {
-		panic(err)
-	}
-	return buf
+	return &b
 }
 
 // TransferDataBlock пересылает считываемые данные блочного файла r прямо в Писателя w
 func TransferDataBlock(r *os.File, w io.Writer) error {
-	var b Block
-	b.Header.Read(r)
-	b.setR(r)
-
-	_, err := io.Copy(w, &b)
+	_, err := io.Copy(w, GetBlockReader(r))
 	return err
 }
 

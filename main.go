@@ -2,12 +2,14 @@ package main
 
 import "fmt"
 import "os"
+import "io"
 import "path"
+import "compress/flate"
 
 const exeVersion = "3.0.36"
 const exeCopyright = "\n\t2008 Denis Demidov 2008-03-30\n\t2014-2016 Sergey Batanov"
 
-type Unpacker struct {
+type Extractor struct {
 	dirname string
 }
 
@@ -16,20 +18,37 @@ type Parser struct {
 }
 
 // ProcessData просто выводит данные без обработки
-func (un Unpacker) ProcessData(f *os.File, filename string) error {
+func (un Extractor) ProcessData(f *os.File, filename string) error {
 	targetFilePath := path.Join(un.dirname, filename)
 	fileOut, err := os.Create(targetFilePath)
 	if err != nil {
 		return err
 	}
-	return TransferDataBlock(f, fileOut)
+	defer fileOut.Close()
+
+	blockReader := GetBlockReader(f)
+	_, err = io.Copy(fileOut, blockReader)
+
+	return err
 }
 
 func (pr Parser) ProcessData(f *os.File, filename string) error {
-	return nil
+
+	blockReader := GetBlockReader(f)
+	inflater := flate.NewReader(blockReader)
+
+	targetFilePath := path.Join(pr.dirname, filename)
+	fileOut, err := os.Create(targetFilePath)
+	if err != nil {
+		return err
+	}
+	defer fileOut.Close()
+
+	_, err = io.Copy(fileOut, inflater)
+	return err
 }
 
-func parse(filename, dirname string) {
+func unpack(filename, dirname string, withParse bool) {
 	fstat, err := os.Stat(filename)
 	if err != nil {
 		panic(err)
@@ -41,16 +60,65 @@ func parse(filename, dirname string) {
 	if err != nil {
 		panic(err)
 	}
+	defer fileIn.Close()
 
 	supplyDirectory(dirname)
 
-	var p Unpacker
-	p.dirname = dirname
-	UnpackToDirectoryNoLoad(dirname, fileIn, FileDataSize, p)
+	var processor DataProcessor
+
+	if withParse {
+		var p Parser
+		p.dirname = dirname
+		processor = p
+	} else {
+		var p Extractor
+		p.dirname = dirname
+		processor = p
+	}
+
+	UnpackToDirectoryNoLoad(dirname, fileIn, FileDataSize, processor)
+}
+
+func inflate(packedFileName, unpackedFileName string) {
+
+	fi, err := os.Open(packedFileName)
+	if err != nil {
+		panic(err)
+	}
+	defer fi.Close()
+
+	fo, err := os.Create(unpackedFileName)
+	if err != nil {
+		panic(err)
+	}
+	defer fo.Close()
+
+	inflater := flate.NewReader(fi)
+	io.Copy(fo, inflater)
 }
 
 func run(args []string) {
-	parse(args[2], args[3])
+
+	if len(args) < 2 {
+		usage()
+		return
+	}
+
+	if args[1] == "-parse" || args[1] == "-p" {
+
+		unpack(args[2], args[3], true)
+
+	} else if args[1] == "-unpack" || args[1] == "-u" {
+
+		unpack(args[2], args[3], false)
+
+	} else if args[1] == "-inflate" || args[1] == "-i" {
+
+		inflate(args[2], args[3])
+
+	} else {
+		usage()
+	}
 }
 
 func usage() {
@@ -76,8 +144,5 @@ func version() {
 }
 
 func main() {
-	// usage()
-	//
-	// run(os.Args)
-	run([]string{os.Args[0], "-parse", "test.epf", "testdir"})
+	run(os.Args)
 }
